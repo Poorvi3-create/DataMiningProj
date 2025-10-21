@@ -1,18 +1,10 @@
-import os
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-# Make loky/joblib avoid heavy cpu detection (best-effort)
-os.environ["LOKY_USE_CPU_COUNT"] = "0"
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans as KMeans
 from sklearn.metrics import silhouette_score
 
 TRAIN = Path(r"C:\Users\Admin\Documents\GitHub\DataMiningProj\cleaned\cleaned_train.csv")
