@@ -1,3 +1,4 @@
+
 import os
 import warnings
 import numpy as np
@@ -20,9 +21,8 @@ warnings.filterwarnings("ignore")
 path = r"C:\Users\Admin\Documents\GitHub\DataMiningProj\LTF Challenge data with dictionary.xlsx"
 incomecol = "Target_Variable/Total Income"
 
-xls = pd.ExcelFile(path)
-traindata = xls.parse(xls.sheet_names[0]).copy()
-testdata = xls.parse(xls.sheet_names[1]).copy()
+traindata = pd.read_excel(path, sheet_name=0, engine="openpyxl")
+testdata = pd.read_excel(path, sheet_name=1, engine="openpyxl")
 
 print("Started")
 
