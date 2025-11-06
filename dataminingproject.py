@@ -13,6 +13,7 @@ from scipy.stats import chi2_contingency
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.decomposition import PCA
+import textwrap
 
 warnings.filterwarnings("ignore")
 
@@ -200,17 +201,51 @@ if xcompact.shape[1] > 0:
 else:
     xpca = xvt.values
 
-reqk = 4
 nsamp = xpca.shape[0]
-kuse = reqk if nsamp >= reqk else max(1, nsamp)
+mink = 2
+maxk = 10
+valid_ks = [k for k in range(mink, maxk + 1) if nsamp > k]
 
-km = KMeans(n_clusters=kuse, random_state=42, n_init=10)
-labels = km.fit_predict(xpca)
+sil_scores = {}
+for k in range(mink, maxk + 1):
+    if nsamp <= k:
+        sil_scores[k] = None
+        continue
+    try:
+        kmtemp = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labs = kmtemp.fit_predict(xpca)
+        sil = silhouette_score(xpca, labs)
+        sil_scores[k] = float(sil)
+    except Exception:
+        sil_scores[k] = None
+
+print("\nSilhouette Scores By K")
+for k in range(mink, maxk + 1):
+    sc = sil_scores.get(k)
+    print(f"K={k} | Silhouette: {round(sc,4) if sc is not None else 'N/A'}")
+
+valid_scores = {k: v for k, v in sil_scores.items() if v is not None}
+if valid_scores:
+    best_k = max(valid_scores.items(), key=lambda x: x[1])[0]
+    best_score = valid_scores[best_k]
+else:
+    best_k = 1
+    best_score = None
+
+if best_k > 1:
+    km = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+    labels = km.fit_predict(xpca)
+else:
+    labels = np.zeros(nsamp, dtype=int)
+
 testclean["clusterlabel"] = labels
 
-sil = None
-if kuse > 1 and xpca.shape[0] > kuse:
-    sil = silhouette_score(xpca, labels)
+sil_final = None
+if best_k > 1 and nsamp > best_k:
+    try:
+        sil_final = silhouette_score(xpca, labels)
+    except Exception:
+        sil_final = None
 
 ct = pd.crosstab(testclean["clusterlabel"], testclean["bestmodelpred"])
 chi2 = chi2_contingency(ct)[0]
@@ -218,7 +253,7 @@ n = ct.values.sum()
 r, k = ct.shape
 cramv = (np.sqrt((chi2 / n) / min(r - 1, k - 1))) if n > 0 and min(r - 1, k - 1) > 0 else 0
 
-print(f"\nForced Clustering K={reqk} = Used K={kuse} | Silhouette: {round(sil,4) if sil is not None else 'N/A'} | Cramér's V: {round(cramv,4)}")
+print(f"\nSelected K = {best_k} | Best Silhouette = {round(best_score,4) if best_score is not None else 'N/A'} | Final Silhouette: {round(sil_final,4) if sil_final is not None else 'N/A'} | Cramér's V: {round(cramv,4)}")
 
 counts = testclean["clusterlabel"].value_counts().sort_index()
 incomeorder = ["Low", "Medium", "High", "Very High"]
@@ -234,9 +269,9 @@ displaytable.columns = ["Count", "Low %", "Medium %", "High %", "Very High %"]
 print("\nCluster Sizes And Income Distribution (%)")
 print(displaytable.to_string())
 
-import textwrap
-
-print("\nCluster Insights (One-Line Summary):")
+def safemean(df, cols):
+    vals = [df[c].astype(float).mean(skipna=True) for c in cols if c in df.columns]
+    return np.mean(vals) if vals else 0
 
 colsinfra = ['perc_of_pop_living_in_hh_electricity','Night light index','Road density (Km/ SqKm)']
 colsagri = ['Kharif Seasons  Irrigated area in 2022','Rabi Seasons  Season Irrigated area in 2022']
@@ -244,10 +279,7 @@ colswealth = ['Non_Agriculture_Income','Total_Land_For_Agriculture']
 colsvillage = ['Village score based on socio-economic parameters (0 to 100)']
 colsprox = ['K022-Proximity to nearest mandi (Km)','K022-Proximity to nearest railway (Km)']
 
-def safemean(df, cols):
-    vals = [df[c].astype(float).mean(skipna=True) for c in cols if c in df.columns]
-    return np.mean(vals) if vals else 0
-
+print("\nCluster Insights (One-Line Summary):")
 clustersummary = []
 for cl in clustertable.index:
     subset = testclean[testclean["clusterlabel"] == cl]
@@ -313,3 +345,117 @@ for cl in dfsum.index:
 outfile = os.path.join(os.path.dirname(path), "final_output_compact.csv")
 testclean.to_csv(outfile, index=False)
 print(f"\nSaved = {outfile} | Shape = {testclean.shape}")
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+outdir = os.path.dirname(path) or "."
+
+metricsfile = os.path.join(outdir, "metrics_grouped_bar.png")
+clusterfile = os.path.join(outdir, "clusters_stacked_income.png")
+silhouettefile = os.path.join(outdir, "silhouette_vs_k.png")
+heatmapfile = os.path.join(outdir, "corr_heatmap_top_features_clean.png")
+
+metricswork = metricsdf.copy().astype(float)
+metricsordered = metricswork.sort_values(by="F1", ascending=False)
+modellist = metricsordered.index.tolist()
+metricnames = ["Accuracy", "Precision", "Recall", "F1"]
+metricvals = [metricsordered[m].values for m in metricnames]
+xpos = np.arange(len(modellist))
+barw = 0.18
+plt.figure(figsize=(10, 6))
+for i, vals in enumerate(metricvals):
+    plt.bar(xpos + (i - 1.5) * barw, vals, width=barw, label=metricnames[i])
+plt.xticks(xpos, modellist)
+plt.xlabel("Model")
+plt.ylabel("Score (Weighted)")
+plt.title("Model Performance (Grouped) = Ordered By F1 (Desc)")
+plt.ylim(0, 1.05)
+plt.legend(title="Metric")
+plt.tight_layout()
+plt.savefig(metricsfile, dpi=300)
+plt.close()
+print(f"Saved Grouped Metrics Bar Chart = {metricsfile}")
+
+displaytablelocal = displaytable.copy()
+if "Low %" in displaytablelocal.columns:
+    perccolnames = ["Low %", "Medium %", "High %", "Very High %"]
+else:
+    perccolnames = [c for c in displaytablelocal.columns if "%" in c]
+    if not perccolnames:
+        temp = clustertable.copy()
+        temp.columns = ["count"] + [s.lower() for s in ["Low", "Medium", "High", "Very High"]]
+        displaytablelocal = temp.rename(columns={s.lower(): s.title() + " %" for s in ["Low", "Medium", "High", "Very High"]})
+        perccolnames = ["Low %", "Medium %", "High %", "Very High %"]
+clusterids = displaytablelocal.index.astype(str).tolist()
+stackdata = displaytablelocal[perccolnames].values
+plt.figure(figsize=(10, 6))
+bottom = np.zeros(len(clusterids))
+colors = ["#FF8A65", "#FF7043", "#FF5722", "#D84315"]
+for i, col in enumerate(perccolnames):
+    vals = stackdata[:, i]
+    plt.bar(clusterids, vals, bottom=bottom, label=col, color=colors[i % len(colors)])
+    bottom += vals
+plt.xlabel("Cluster")
+plt.ylabel("Percentage (%)")
+plt.title("Cluster Composition By Income Category (Stacked %)")
+plt.legend(title="Income Category", bbox_to_anchor=(1.05, 1), loc="upper left")
+plt.tight_layout()
+plt.savefig(clusterfile, dpi=300)
+plt.close()
+print(f"Saved Cluster Income Stacked Chart = {clusterfile}")
+
+silscores = sil_scores.copy()
+klist = sorted([k for k in silscores.keys()])
+silvals = [silscores.get(k) if silscores.get(k) is not None else np.nan for k in klist]
+plt.figure(figsize=(9, 5))
+plt.plot(klist, silvals, marker="o", linewidth=2)
+plt.xticks(klist)
+plt.xlabel("K (Number Of Clusters)")
+plt.ylabel("Silhouette Score")
+plt.title("Silhouette Score Vs K")
+if not all(np.isnan(silvals)):
+    validvals = [v for v in silvals if not np.isnan(v)]
+    ymin = max(0, min(validvals) - 0.03)
+    ymax = min(1, max(validvals) + 0.03)
+    plt.ylim(ymin, ymax)
+    plt.gca().set_ylim(ymin, ymax)
+    plt.gca().spines["bottom"].set_visible(True)
+    plt.gca().spines["top"].set_visible(True)
+    plt.gca().spines["left"].set_visible(True)
+    plt.gca().spines["right"].set_visible(True)
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig(silhouettefile, dpi=300)
+plt.close()
+print(f"Saved Silhouette Vs K Line Chart = {silhouettefile}")
+
+xtrain = xtrainenc.copy()
+targetseries = pd.Series(yenc, name="Target")
+if len(xtrain) > len(targetseries):
+    xtrain = xtrain.iloc[: len(targetseries)].reset_index(drop=True)
+elif len(targetseries) > len(xtrain):
+    targetseries = targetseries.iloc[: len(xtrain)].reset_index(drop=True)
+corrwithtarget = xtrain.corrwith(targetseries).sort_values(key=lambda x: abs(x), ascending=False)
+topn = min(10, corrwithtarget.shape[0])
+topfeatures = corrwithtarget.head(topn)
+corrdf = pd.DataFrame({"Feature": topfeatures.index, "Correlation": topfeatures.values})
+plt.figure(figsize=(8, 6))
+sns.heatmap(
+    corrdf.set_index("Feature").T,
+    annot=True,
+    fmt=".2f",
+    cmap="OrRd",
+    cbar_kws={"label": "Pearson R"},
+    linewidths=0.5
+)
+plt.title("Top 10 Feature Correlations With Target")
+plt.xticks(rotation=45, ha="right")
+plt.yticks(rotation=0)
+plt.tight_layout()
+plt.savefig(heatmapfile, dpi=300)
+plt.close()
+print(f"Saved Correlation Heatmap = {heatmapfile}")
