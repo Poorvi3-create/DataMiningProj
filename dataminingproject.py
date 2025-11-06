@@ -8,8 +8,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, silhouette_score
-from sklearn.cluster import KMeans, AgglomerativeClustering
-from scipy.stats import chi2_contingency, pearsonr
+from sklearn.cluster import KMeans
+from scipy.stats import chi2_contingency
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.decomposition import PCA
@@ -17,145 +17,132 @@ from sklearn.decomposition import PCA
 warnings.filterwarnings("ignore")
 
 path = r"C:\Users\Admin\Documents\GitHub\DataMiningProj\LTF Challenge data with dictionary.xlsx"
-income_col = "Target_Variable/Total Income"
+incomecol = "Target_Variable/Total Income"
 
 xls = pd.ExcelFile(path)
-train = xls.parse(xls.sheet_names[0]).copy()
-test = xls.parse(xls.sheet_names[1]).copy()
+traindata = xls.parse(xls.sheet_names[0]).copy()
+testdata = xls.parse(xls.sheet_names[1]).copy()
 
-print("started")
+print("Started")
 
-if income_col in test.columns:
-    test = test.drop(columns=[income_col])
+if incomecol in testdata.columns:
+    testdata = testdata.drop(columns=[incomecol])
 
-id_like = [c for c in train.columns if any(x in c.lower() for x in ["id", "uuid", "index"])]
-train = train.drop(columns=id_like, errors="ignore")
-test = test.drop(columns=id_like, errors="ignore")
+idcols = [c for c in traindata.columns if any(x in c.lower() for x in ["id", "uuid", "index"])]
+traindata = traindata.drop(columns=idcols, errors="ignore")
+testdata = testdata.drop(columns=idcols, errors="ignore")
 
-def clean_frame(frame):
+def cleanframe(frame):
     frame = frame.copy()
-    numeric = frame.select_dtypes(include=[np.number]).columns.tolist()
-    categorical = [c for c in frame.columns if c not in numeric]
-    num_imp = SimpleImputer(strategy="median")
-    cat_imp = SimpleImputer(strategy="most_frequent")
-    if numeric:
-        frame[numeric] = num_imp.fit_transform(frame[numeric])
-    if categorical:
-        frame[categorical] = cat_imp.fit_transform(frame[categorical])
+    numcols = frame.select_dtypes(include=[np.number]).columns.tolist()
+    catcols = [c for c in frame.columns if c not in numcols]
+    numimp = SimpleImputer(strategy="median")
+    catimp = SimpleImputer(strategy="most_frequent")
+    if numcols:
+        frame[numcols] = numimp.fit_transform(frame[numcols])
+    if catcols:
+        frame[catcols] = catimp.fit_transform(frame[catcols])
     frame = frame.drop_duplicates().reset_index(drop=True)
-    return frame, numeric, categorical
+    return frame, numcols, catcols
 
-train_clean, train_numeric, train_categorical = clean_frame(train)
-test_clean, test_numeric, test_categorical = clean_frame(test)
+trainclean, trainnumcols, traincatcols = cleanframe(traindata)
+testclean, testnumcols, testcatcols = cleanframe(testdata)
 
-print("step1_loaded_counts -> train_rows:", train_clean.shape[0], "train_cols:", train_clean.shape[1],
-      "test_rows:", test_clean.shape[0], "test_cols:", test_clean.shape[1])
-print("step1_feature_counts -> numeric_count:", len(train_numeric), "categorical_count:", len(train_categorical))
-print("step1_columns_index_preview -> train_cols_index: 1..", train_clean.shape[1], "test_cols_index: 1..", test_clean.shape[1])
+print("Step1 Loaded Counts = Train Rows:", trainclean.shape[0], "Train Cols:", trainclean.shape[1], "Test Rows:", testclean.shape[0], "Test Cols:", testclean.shape[1])
+print("Step1 Feature Counts = Numeric Count:", len(trainnumcols), "Categorical Count:", len(traincatcols))
+print("Step1 Columns Index Preview = Train Cols Index: 1..", trainclean.shape[1], "Test Cols Index: 1..", testclean.shape[1])
 
-if income_col not in train_clean.columns:
+if incomecol not in trainclean.columns:
     raise ValueError("Income column missing")
 
-train_clean["IncomeCategory"] = pd.qcut(
-    train_clean[income_col],
-    q=4,
-    labels=["Low", "Medium", "High", "Very High"],
-    duplicates="drop"
-)
-counts_by_cat = train_clean["IncomeCategory"].value_counts().reindex(["Low", "Medium", "High", "Very High"]).fillna(0).astype(int)
-print("step3_income_bins ->", counts_by_cat.to_dict())
+trainclean["incomecat"] = pd.qcut(trainclean[incomecol], q=4, labels=["Low", "Medium", "High", "Very High"], duplicates="drop")
+countinc = trainclean["incomecat"].value_counts().reindex(["Low", "Medium", "High", "Very High"]).fillna(0).astype(int)
+print("Step3 Income Bins =", countinc.to_dict())
 
-common_features = [c for c in train_clean.columns if c in test_clean.columns and c != income_col]
-print("step4_common_feature_count ->", len(common_features))
+commoncols = [c for c in trainclean.columns if c in testclean.columns and c != incomecol]
+print("Step4 Common Feature Count =", len(commoncols))
 
-x_train = train_clean[common_features].copy()
-x_test = test_clean[common_features].copy()
-for c in x_train.select_dtypes(include=['object', 'category']).columns:
-    x_train[c] = x_train[c].astype(str)
-    if c in x_test.columns:
-        x_test[c] = x_test[c].astype(str)
+xtrain = trainclean[commoncols].copy()
+xtest = testclean[commoncols].copy()
+for c in xtrain.select_dtypes(include=['object', 'category']).columns:
+    xtrain[c] = xtrain[c].astype(str)
+    if c in xtest.columns:
+        xtest[c] = xtest[c].astype(str)
 
-onehot_cols = [c for c in x_train.columns if x_train[c].nunique() < 50 and x_train[c].dtype == "object"]
-label_cols = [c for c in x_train.columns if x_train[c].dtype == "object" and x_train[c].nunique() >= 50]
+onehotcols = [c for c in xtrain.columns if xtrain[c].nunique() < 50 and xtrain[c].dtype == "object"]
+labelcols = [c for c in xtrain.columns if xtrain[c].dtype == "object" and xtrain[c].nunique() >= 50]
 
-for c in label_cols:
+for c in labelcols:
     le = LabelEncoder()
-    if c not in x_test.columns:
-        x_test[c] = ""
-    full = pd.concat([x_train[c].astype(str), x_test[c].astype(str)], axis=0)
+    if c not in xtest.columns:
+        xtest[c] = ""
+    full = pd.concat([xtrain[c].astype(str), xtest[c].astype(str)], axis=0)
     le.fit(full)
-    x_train[c] = le.transform(x_train[c].astype(str))
-    x_test[c] = le.transform(x_test[c].astype(str))
+    xtrain[c] = le.transform(xtrain[c].astype(str))
+    xtest[c] = le.transform(xtest[c].astype(str))
 
-x_train_dummies = pd.get_dummies(x_train[onehot_cols], drop_first=False) if onehot_cols else pd.DataFrame(index=x_train.index)
-x_test_dummies = pd.get_dummies(x_test[onehot_cols], drop_first=False) if onehot_cols else pd.DataFrame(index=x_test.index)
-x_train_rest = x_train.drop(columns=onehot_cols, errors="ignore")
-x_test_rest = x_test.drop(columns=onehot_cols, errors="ignore")
+xtraindum = pd.get_dummies(xtrain[onehotcols], drop_first=False) if onehotcols else pd.DataFrame(index=xtrain.index)
+xtestdum = pd.get_dummies(xtest[onehotcols], drop_first=False) if onehotcols else pd.DataFrame(index=xtest.index)
+xtrainrest = xtrain.drop(columns=onehotcols, errors="ignore")
+xtestrest = xtest.drop(columns=onehotcols, errors="ignore")
 
-x_train_enc = pd.concat([x_train_rest.reset_index(drop=True), x_train_dummies.reset_index(drop=True)], axis=1)
-x_test_dummies_aligned = x_test_dummies.reindex(columns=x_train_dummies.columns, fill_value=0) if not x_train_dummies.empty else x_test_dummies
-x_test_enc = pd.concat([x_test_rest.reset_index(drop=True), x_test_dummies_aligned.reset_index(drop=True)], axis=1)
+xtrainenc = pd.concat([xtrainrest.reset_index(drop=True), xtraindum.reset_index(drop=True)], axis=1)
+xtestdumalign = xtestdum.reindex(columns=xtraindum.columns, fill_value=0) if not xtraindum.empty else xtestdum
+xtestenc = pd.concat([xtestrest.reset_index(drop=True), xtestdumalign.reset_index(drop=True)], axis=1)
 
-num_cols_all = x_train_enc.select_dtypes(include=[np.number]).columns.tolist()
+numall = xtrainenc.select_dtypes(include=[np.number]).columns.tolist()
 scaler = StandardScaler()
-if num_cols_all:
-    x_train_enc[num_cols_all] = scaler.fit_transform(x_train_enc[num_cols_all])
-    for col in num_cols_all:
-        if col not in x_test_enc.columns:
-            x_test_enc[col] = 0.0
-    x_test_enc[num_cols_all] = scaler.transform(x_test_enc[num_cols_all])
+if numall:
+    xtrainenc[numall] = scaler.fit_transform(xtrainenc[numall])
+    for col in numall:
+        if col not in xtestenc.columns:
+            xtestenc[col] = 0.0
+    xtestenc[numall] = scaler.transform(xtestenc[numall])
 
-print("step5_preprocessing_done -> final_variable_count:", x_train_enc.shape[1])
+print("Step5 Preprocessing Done = Final Variable Count:", xtrainenc.shape[1])
 
-y_train = train_clean["IncomeCategory"].astype(str).reset_index(drop=True)
+ytrain = trainclean["incomecat"].astype(str).reset_index(drop=True)
 le = LabelEncoder()
-y_enc = le.fit_transform(y_train)
+yenc = le.fit_transform(ytrain)
 
 models = {
-    "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
-    "DecisionTree": DecisionTreeClassifier(random_state=42),
-    "KNN": KNeighborsClassifier()
+    "randomforest": RandomForestClassifier(n_estimators=100, random_state=42),
+    "decisiontree": DecisionTreeClassifier(random_state=42),
+    "knn": KNeighborsClassifier()
 }
-X_tr, X_val, y_tr, y_val = train_test_split(x_train_enc, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
+xtr, xval, ytr, yval = train_test_split(xtrainenc, yenc, test_size=0.2, random_state=42, stratify=yenc)
 
 metrics = {}
 preds = {}
 for name, model in models.items():
-    model.fit(X_tr, y_tr)
-    p_val = model.predict(X_val)
-    acc = accuracy_score(y_val, p_val)
-    prec = precision_score(y_val, p_val, average="weighted", zero_division=0)
-    rec = recall_score(y_val, p_val, average="weighted", zero_division=0)
-    f1 = f1_score(y_val, p_val, average="weighted", zero_division=0)
+    model.fit(xtr, ytr)
+    pval = model.predict(xval)
+    acc = accuracy_score(yval, pval)
+    prec = precision_score(yval, pval, average="weighted", zero_division=0)
+    rec = recall_score(yval, pval, average="weighted", zero_division=0)
+    f1 = f1_score(yval, pval, average="weighted", zero_division=0)
     metrics[name] = {"Accuracy": round(acc, 4), "Precision": round(prec, 4), "Recall": round(rec, 4), "F1": round(f1, 4)}
-    missing_cols = [c for c in X_tr.columns if c not in x_test_enc.columns]
-    for mc in missing_cols:
-        x_test_enc[mc] = 0
-    x_test_enc = x_test_enc[X_tr.columns]
-    preds[name] = le.inverse_transform(model.predict(x_test_enc))
+    missingcols = [c for c in xtr.columns if c not in xtestenc.columns]
+    for mc in missingcols:
+        xtestenc[mc] = 0
+    xtestenc = xtestenc[xtr.columns]
+    preds[name] = le.inverse_transform(model.predict(xtestenc))
 
-metrics_df = pd.DataFrame(metrics).T
-best_model = metrics_df.sort_values(by=["F1", "Accuracy"], ascending=False).index[0]
-print("step6_model_metrics")
-print(metrics_df)
-print("step6_best_model ->", best_model)
+metricsdf = pd.DataFrame(metrics).T
+bestmodel = metricsdf.sort_values(by=["F1", "Accuracy"], ascending=False).index[0]
+print("Step6 Model Metrics")
+print(metricsdf)
+print("Step6 Best Model =", bestmodel)
 
 for k, v in preds.items():
-    test_clean[f"Pred_{k}"] = v
-test_clean["BestModelPred"] = test_clean[f"Pred_{best_model}"]
-print("step7_predictions_added -> prediction_cols:", len([c for c in test_clean.columns if c.startswith('Pred_')]), "and BestModelPred")
+    testclean[f"pred{k}"] = v
+testclean["bestmodelpred"] = testclean[f"pred{bestmodel}"]
+print("Step7 Predictions Added = Prediction Cols:", len([c for c in testclean.columns if c.startswith('pred')]), "And BestModelPred")
 
-print("step7_predictions_sample_first5")
-print(test_clean[[c for c in test_clean.columns if c.startswith('Pred_')] + ["BestModelPred"]].head(5).to_string(index=False))
+print("Step7 Predictions Sample First5")
+print(testclean[[c for c in testclean.columns if c.startswith('pred')] + ["bestmodelpred"]].head(5).to_string(index=False))
 
-def cramers_v(confusion_matrix):
-    chi2 = chi2_contingency(confusion_matrix)[0]
-    n = confusion_matrix.values.sum()
-    r, k = confusion_matrix.shape
-    denom = min(r - 1, k - 1)
-    return np.sqrt((chi2 / n) / denom) if n > 0 and denom > 0 else 0
-
-features_for_clustering = [
+featuresforclust = [
     "Non_Agriculture_Income",
     "Total_Land_For_Agriculture",
     "perc_of_pop_living_in_hh_electricity",
@@ -173,90 +160,156 @@ features_for_clustering = [
     "REGION"
 ]
 
-features_for_clustering = [f for f in features_for_clustering if f in x_test_enc.columns]
+featuresforclust = [f for f in featuresforclust if f in xtestenc.columns]
 
-if not features_for_clustering:
-    x_for_clustering = x_test_enc.copy()
+if not featuresforclust:
+    xforclust = xtestenc.copy()
 else:
-    x_for_clustering = x_test_enc[features_for_clustering].copy()
+    xforclust = xtestenc[featuresforclust].copy()
 
 vt = VarianceThreshold(threshold=0.01)
-if x_for_clustering.shape[1] > 0:
+if xforclust.shape[1] > 0:
     try:
-        x_vt = pd.DataFrame(vt.fit_transform(x_for_clustering),
-                            columns=[c for c, v in zip(x_for_clustering.columns, vt.get_support()) if v],
-                            index=x_for_clustering.index)
+        xvt = pd.DataFrame(vt.fit_transform(xforclust), columns=[c for c, v in zip(xforclust.columns, vt.get_support()) if v], index=xforclust.index)
     except Exception:
-        x_vt = x_for_clustering.copy()
+        xvt = xforclust.copy()
 else:
-    x_vt = x_for_clustering.copy()
+    xvt = xforclust.copy()
 
-infra = [c for c in ['perc_of_pop_living_in_hh_electricity', 'Road density (Km/ SqKm)', 'Night light index'] if c in x_vt.columns]
-agri = [c for c in ['Kharif Seasons  Irrigated area in 2022', 'Rabi Seasons  Season Irrigated area in 2022', 'Kharif Seasons  Seasonal average groundwater replenishment rate (cm) in 2022', 'Rabi Seasons  Seasonal average groundwater thickness (cm) in 2022'] if c in x_vt.columns]
-wealth = [c for c in ['Non_Agriculture_Income', 'perc_Households_with_Pucca_House_That_Has_More_Than_3_Rooms', 'Total_Land_For_Agriculture'] if c in x_vt.columns]
+infra = [c for c in ['perc_of_pop_living_in_hh_electricity', 'Road density (Km/ SqKm)', 'Night light index'] if c in xvt.columns]
+agri = [c for c in ['Kharif Seasons  Irrigated area in 2022', 'Rabi Seasons  Season Irrigated area in 2022', 'Kharif Seasons  Seasonal average groundwater replenishment rate (cm) in 2022', 'Rabi Seasons  Seasonal average groundwater thickness (cm) in 2022'] if c in xvt.columns]
+wealth = [c for c in ['Non_Agriculture_Income', 'perc_Households_with_Pucca_House_That_Has_More_Than_3_Rooms', 'Total_Land_For_Agriculture'] if c in xvt.columns]
 
-indices = pd.DataFrame(index=x_vt.index)
+indices = pd.DataFrame(index=xvt.index)
 if infra:
-    indices['infra_idx'] = x_vt[infra].mean(axis=1)
+    indices['infraidx'] = xvt[infra].mean(axis=1)
 if agri:
-    indices['agri_idx'] = x_vt[agri].mean(axis=1)
+    indices['agriidx'] = xvt[agri].mean(axis=1)
 if wealth:
-    indices['wealth_idx'] = x_vt[wealth].mean(axis=1)
+    indices['wealthidx'] = xvt[wealth].mean(axis=1)
 if indices.shape[1] == 0:
-    x_compact = x_vt.copy()
+    xcompact = xvt.copy()
 else:
     sc = StandardScaler()
-    x_compact = pd.DataFrame(sc.fit_transform(indices), columns=indices.columns, index=indices.index)
+    xcompact = pd.DataFrame(sc.fit_transform(indices), columns=indices.columns, index=indices.index)
 
-pca_components = min(3, x_compact.shape[1]) if x_compact.shape[1] > 0 else 1
-if x_compact.shape[1] > 0:
-    pca = PCA(n_components=pca_components, random_state=42)
-    x_pca = pca.fit_transform(x_compact)
+pcacomp = min(3, xcompact.shape[1]) if xcompact.shape[1] > 0 else 1
+if xcompact.shape[1] > 0:
+    pca = PCA(n_components=pcacomp, random_state=42)
+    xpca = pca.fit_transform(xcompact)
 else:
-    x_pca = x_vt.values
+    xpca = xvt.values
 
-requested_k = 4
-n_samples = x_pca.shape[0]
-k_use = requested_k if n_samples >= requested_k else max(1, n_samples)
+reqk = 4
+nsamp = xpca.shape[0]
+kuse = reqk if nsamp >= reqk else max(1, nsamp)
 
-km = KMeans(n_clusters=k_use, random_state=42, n_init=10)
-labels = km.fit_predict(x_pca)
-test_clean["ClusterLabel"] = labels
+km = KMeans(n_clusters=kuse, random_state=42, n_init=10)
+labels = km.fit_predict(xpca)
+testclean["clusterlabel"] = labels
 
 sil = None
-if k_use > 1 and x_pca.shape[0] > k_use:
-    sil = silhouette_score(x_pca, labels)
+if kuse > 1 and xpca.shape[0] > kuse:
+    sil = silhouette_score(xpca, labels)
 
-ct = pd.crosstab(test_clean["ClusterLabel"], test_clean["BestModelPred"])
+ct = pd.crosstab(testclean["clusterlabel"], testclean["bestmodelpred"])
 chi2 = chi2_contingency(ct)[0]
 n = ct.values.sum()
 r, k = ct.shape
-cramerV = (np.sqrt((chi2 / n) / min(r - 1, k - 1))) if n > 0 and min(r - 1, k - 1) > 0 else 0
+cramv = (np.sqrt((chi2 / n) / min(r - 1, k - 1))) if n > 0 and min(r - 1, k - 1) > 0 else 0
 
-print(f"\nFORCED clustering k={requested_k} -> used_k={k_use} | silhouette: {round(sil,4) if sil is not None else 'N/A'} | Cramér's V: {round(cramerV,4)}")
+print(f"\nForced Clustering K={reqk} = Used K={kuse} | Silhouette: {round(sil,4) if sil is not None else 'N/A'} | Cramér's V: {round(cramv,4)}")
 
-counts = test_clean["ClusterLabel"].value_counts().sort_index()
-print("\nCluster sizes:")
-print(counts.to_string())
+counts = testclean["clusterlabel"].value_counts().sort_index()
+incomeorder = ["Low", "Medium", "High", "Very High"]
+rows = []
+for cl in counts.index:
+    subset = testclean[testclean["clusterlabel"] == cl]
+    distpct = subset["bestmodelpred"].value_counts(normalize=True).reindex(incomeorder, fill_value=0) * 100
+    rows.append([counts[cl]] + [round(distpct[label], 1) for label in incomeorder])
+clustertable = pd.DataFrame(rows, index=counts.index, columns=["count"] + [s.lower() for s in incomeorder])
+clustertable.index.name = "clusterlabel"
+displaytable = clustertable.copy()
+displaytable.columns = ["Count", "Low %", "Medium %", "High %", "Very High %"]
+print("\nCluster Sizes And Income Distribution (%)")
+print(displaytable.to_string())
 
-print("\nOne-line summaries (count, majority predicted income, top-3 numeric means):")
-for cl in sorted(test_clean["ClusterLabel"].unique()):
-    subset = test_clean[test_clean["ClusterLabel"] == cl]
-    cnt = int(subset.shape[0])
-    if "BestModelPred" in subset.columns and not subset["BestModelPred"].isnull().all():
-        pred_dist = subset["BestModelPred"].value_counts(normalize=True) * 100
-        top_pred = pred_dist.idxmax()
-        top_pred_pct = round(pred_dist.max(), 1)
+import textwrap
+
+print("\nCluster Insights (One-Line Summary):")
+
+colsinfra = ['perc_of_pop_living_in_hh_electricity','Night light index','Road density (Km/ SqKm)']
+colsagri = ['Kharif Seasons  Irrigated area in 2022','Rabi Seasons  Season Irrigated area in 2022']
+colswealth = ['Non_Agriculture_Income','Total_Land_For_Agriculture']
+colsvillage = ['Village score based on socio-economic parameters (0 to 100)']
+colsprox = ['K022-Proximity to nearest mandi (Km)','K022-Proximity to nearest railway (Km)']
+
+def safemean(df, cols):
+    vals = [df[c].astype(float).mean(skipna=True) for c in cols if c in df.columns]
+    return np.mean(vals) if vals else 0
+
+clustersummary = []
+for cl in clustertable.index:
+    subset = testclean[testclean["clusterlabel"] == cl]
+    vals = {
+        "infra": safemean(subset, colsinfra),
+        "agri": safemean(subset, colsagri),
+        "wealth": safemean(subset, colswealth),
+        "village": safemean(subset, colsvillage),
+        "prox": safemean(subset, colsprox)
+    }
+    clustersummary.append((cl, vals))
+
+dfsum = pd.DataFrame([v for _, v in clustersummary], index=[c for c, _ in clustersummary])
+rankings = {col: dfsum[col].rank(ascending=False, method="dense") for col in dfsum.columns}
+
+for cl in dfsum.index:
+    rankdata = {k: rankings[k][cl] for k in rankings}
+    phrases = []
+
+    if rankdata["wealth"] == 1:
+        phrases.append("the most affluent cluster with the highest non-farm income and land value")
+    elif rankdata["wealth"] == len(dfsum):
+        phrases.append("the least affluent cluster with the lowest income and limited assets")
+    elif rankdata["wealth"] <= 2:
+        phrases.append("among the higher income clusters showing strong financial capacity")
+    elif rankdata["wealth"] >= len(dfsum) - 1:
+        phrases.append("among the lower income groups with weaker economic base")
+
+    if rankdata["infra"] == 1:
+        phrases.append("showing best infrastructure access and connectivity")
+    elif rankdata["infra"] == len(dfsum):
+        phrases.append("having the weakest infrastructure and poor road density")
+    elif rankdata["infra"] <= 2:
+        phrases.append("well connected but with uneven service access")
     else:
-        top_pred = None
-        top_pred_pct = 0.0
-    numeric_cols = [c for c in features_for_clustering if c in subset.select_dtypes(include=[np.number]).columns]
-    top_num_means = {}
-    if numeric_cols:
-        means = subset[numeric_cols].mean().sort_values(ascending=False)
-        top_num_means = {k: (round(v, 2) if isinstance(v, float) else int(v)) for k, v in means.head(3).to_dict().items()}
-    print(f"Cluster {cl}: n={cnt} | majority_pred={top_pred} ({top_pred_pct}%) | top_numeric_means={top_num_means}")
+        phrases.append("moderate infrastructure conditions")
 
-out_file = os.path.join(os.path.dirname(path), "final_output_compact.csv")
-test_clean.to_csv(out_file, index=False)
-print(f"\nSaved -> {out_file} | shape: {test_clean.shape}")
+    if rankdata["agri"] == 1:
+        phrases.append("with the highest irrigation coverage and most active agriculture")
+    elif rankdata["agri"] == len(dfsum):
+        phrases.append("with the least agricultural engagement and irrigation use")
+    elif rankdata["agri"] <= 2:
+        phrases.append("agriculture-focused with good irrigation presence")
+    else:
+        phrases.append("balanced agricultural activity")
+
+    if rankdata["prox"] == 1:
+        phrases.append("closest to markets and transport hubs")
+    elif rankdata["prox"] == len(dfsum):
+        phrases.append("most geographically remote cluster")
+    else:
+        phrases.append("moderately connected to trade networks")
+
+    if rankdata["village"] == 1:
+        phrases.append("socially advanced with strong village development indicators")
+    elif rankdata["village"] == len(dfsum):
+        phrases.append("socially lagging on basic amenities and literacy")
+
+    desc = ", ".join(phrases[:4])
+    wrapped = "\n     ".join(textwrap.wrap(desc.capitalize() + ".", width=110))
+    print(f"Cluster {cl}: {wrapped}")
+
+outfile = os.path.join(os.path.dirname(path), "final_output_compact.csv")
+testclean.to_csv(outfile, index=False)
+print(f"\nSaved = {outfile} | Shape = {testclean.shape}")
