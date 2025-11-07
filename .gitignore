@@ -1,0 +1,36 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.env.*
+env/
+venv/
+.venv/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code / Editors
+.vscode/
+*.code-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+

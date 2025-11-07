@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+# Treat structured data as text for diffs
+*.csv text eol=lf
+*.tsv text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.xlsx binary
+*.xls binary
+
+
